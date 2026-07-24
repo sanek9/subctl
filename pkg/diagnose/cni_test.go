@@ -328,6 +328,7 @@ func (t *cniTestDriver) createOVNPod(ctx context.Context, version, containerName
 func (t *cniTestDriver) testCiliumCNIPlugin() {
 	BeforeEach(func() {
 		t.submariner.Status.NetworkPlugin = "cilium"
+		t.submariner.Spec.CiliumNamespace = metav1.NamespaceSystem
 	})
 
 	Context("and publisher wiring is configured correctly", func() {
@@ -336,6 +337,15 @@ func (t *cniTestDriver) testCiliumCNIPlugin() {
 		})
 
 		t.testSuccess(t.run)
+	})
+
+	Context("and spec.ciliumNamespace is empty", func() {
+		BeforeEach(func(ctx SpecContext) {
+			t.submariner.Spec.CiliumNamespace = ""
+			t.createCiliumPublisherWiring(ctx, true)
+		})
+
+		t.testFailure(t.run, "ciliumNamespace")
 	})
 
 	Context("and cilium-config cluster-id is 0", func() {

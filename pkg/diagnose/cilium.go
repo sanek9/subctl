@@ -26,6 +26,7 @@ import (
 	"github.com/submariner-io/admiral/pkg/names"
 	"github.com/submariner-io/admiral/pkg/reporter"
 	"github.com/submariner-io/subctl/pkg/cluster"
+	"github.com/submariner-io/submariner-operator/pkg/ciliumcm"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -35,13 +36,7 @@ import (
 // Inline until that constant is in subctl's released submariner dependency.
 const ciliumCNI = "cilium"
 
-const (
-	ciliumConfigMapName     = "cilium-config"
-	ciliumCMTLSSecretName   = "submariner-cilium-cm-tls"
-	ciliumClusterMeshSecret = "cilium-clustermesh"
-	ciliumCMRemoteName      = "submariner"
-	ciliumCMListenURLEnv    = "SUBMARINER_CILIUM_CM_LISTEN_URL"
-)
+const ciliumCMListenURLEnv = "SUBMARINER_CILIUM_CM_LISTEN_URL"
 
 func checkCiliumClusterMeshPublisher(ctx context.Context, info *cluster.Info, status reporter.Interface) error {
 	if !strings.EqualFold(info.Submariner.Status.NetworkPlugin, ciliumCNI) {
@@ -54,9 +49,26 @@ func checkCiliumClusterMeshPublisher(ctx context.Context, info *cluster.Info, st
 	tracker := reporter.NewTracker(status)
 	client := info.ClientProducer.ForKubernetes()
 
-	checkCiliumClusterID(ctx, client, tracker)
+	ciliumNS := info.Submariner.Spec.CiliumNamespace
+	if ciliumNS == "" {
+		ciliumNS = info.Submariner.Status.CiliumNamespace
+	}
+
+	secretName := ciliumcm.ClusterMeshSecretNameOrDefault(info.Submariner.Spec.CiliumClusterMeshSecret)
+	if info.Submariner.Spec.CiliumClusterMeshSecret == "" && info.Submariner.Status.CiliumClusterMeshSecret != "" {
+		secretName = info.Submariner.Status.CiliumClusterMeshSecret
+	}
+
+	if ciliumNS == "" {
+		tracker.Failure(
+			"spec.ciliumNamespace is empty; set it to the namespace containing cilium-config " +
+				"(subctl join sets this when exactly one cilium-config is found)")
+	} else {
+		checkCiliumClusterID(ctx, client, ciliumNS, tracker)
+		checkCiliumClusterMeshPeer(ctx, client, ciliumNS, secretName, tracker)
+	}
+
 	checkCiliumCMTLSSecret(ctx, client, info.Submariner.Namespace, tracker)
-	checkCiliumClusterMeshPeer(ctx, client, tracker)
 	checkCiliumCMRouteAgentEnv(ctx, client, info.Submariner.Namespace, tracker)
 
 	if tracker.HasFailures() {
@@ -68,17 +80,17 @@ func checkCiliumClusterMeshPublisher(ctx context.Context, info *cluster.Info, st
 	return nil
 }
 
-func checkCiliumClusterID(ctx context.Context, client kubernetes.Interface, status reporter.Interface) {
-	cm, err := client.CoreV1().ConfigMaps(metav1.NamespaceSystem).Get(ctx, ciliumConfigMapName, metav1.GetOptions{})
+func checkCiliumClusterID(ctx context.Context, client kubernetes.Interface, ciliumNS string, status reporter.Interface) {
+	cm, err := client.CoreV1().ConfigMaps(ciliumNS).Get(ctx, ciliumcm.CiliumConfigMapName, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			status.Failure("ConfigMap %q not found in %q; cannot validate Cilium cluster-id",
-				ciliumConfigMapName, metav1.NamespaceSystem)
+				ciliumcm.CiliumConfigMapName, ciliumNS)
 
 			return
 		}
 
-		status.Failure("Error reading ConfigMap %q: %v", ciliumConfigMapName, err)
+		status.Failure("Error reading ConfigMap %q: %v", ciliumcm.CiliumConfigMapName, err)
 
 		return
 	}
@@ -102,52 +114,50 @@ func checkCiliumCMTLSSecret(ctx context.Context, client kubernetes.Interface, na
 		namespace = metav1.NamespaceDefault
 	}
 
-	secret, err := client.CoreV1().Secrets(namespace).Get(ctx, ciliumCMTLSSecretName, metav1.GetOptions{})
+	secret, err := client.CoreV1().Secrets(namespace).Get(ctx, ciliumcm.TLSSecretName, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			status.Failure("Secret %q not found in namespace %q (operator should create it when NetworkPlugin is cilium)",
-				ciliumCMTLSSecretName, namespace)
+				ciliumcm.TLSSecretName, namespace)
 
 			return
 		}
 
-		status.Failure("Error reading Secret %q: %v", ciliumCMTLSSecretName, err)
+		status.Failure("Error reading Secret %q: %v", ciliumcm.TLSSecretName, err)
 
 		return
 	}
 
-	for _, key := range []string{"ca.crt", "tls.crt", "tls.key", "client.crt", "client.key"} {
+	for _, key := range []string{
+		ciliumcm.CACertKey, ciliumcm.TLSCertKey, ciliumcm.TLSKeyKey,
+		ciliumcm.ClientCertKey, ciliumcm.ClientKeyKey,
+	} {
 		if len(secret.Data[key]) == 0 {
-			status.Failure("Secret %q is missing key %q", ciliumCMTLSSecretName, key)
+			status.Failure("Secret %q is missing key %q", ciliumcm.TLSSecretName, key)
 		}
 	}
 }
 
-func checkCiliumClusterMeshPeer(ctx context.Context, client kubernetes.Interface, status reporter.Interface) {
-	secret, err := client.CoreV1().Secrets(metav1.NamespaceSystem).Get(ctx, ciliumClusterMeshSecret, metav1.GetOptions{})
+func checkCiliumClusterMeshPeer(ctx context.Context, client kubernetes.Interface, ciliumNS, secretName string,
+	status reporter.Interface,
+) {
+	secret, err := client.CoreV1().Secrets(ciliumNS).Get(ctx, secretName, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			status.Failure("Secret %q not found in %q; operator should merge the Submariner peer",
-				ciliumClusterMeshSecret, metav1.NamespaceSystem)
+				secretName, ciliumNS)
 
 			return
 		}
 
-		status.Failure("Error reading Secret %q: %v", ciliumClusterMeshSecret, err)
+		status.Failure("Error reading Secret %q: %v", secretName, err)
 
 		return
 	}
 
-	required := []string{
-		ciliumCMRemoteName,
-		ciliumCMRemoteName + ".etcd-client-ca.crt",
-		ciliumCMRemoteName + ".etcd-client.crt",
-		ciliumCMRemoteName + ".etcd-client.key",
-	}
-
-	for _, key := range required {
+	for _, key := range ciliumcm.PeerSecretKeys(ciliumcm.DefaultRemoteName) {
 		if len(secret.Data[key]) == 0 {
-			status.Failure("cilium-clustermesh is missing peer key %q", key)
+			status.Failure("%s is missing peer key %q", secretName, key)
 		}
 	}
 }
@@ -187,7 +197,7 @@ func checkCiliumCMRouteAgentEnv(ctx context.Context, client kubernetes.Interface
 	}
 
 	for i := range routeAgent.Spec.Template.Spec.Volumes {
-		if routeAgent.Spec.Template.Spec.Volumes[i].Name == "cilium-cm-tls" {
+		if routeAgent.Spec.Template.Spec.Volumes[i].Name == ciliumcm.VolumeName {
 			foundTLSVol = true
 			break
 		}
@@ -199,6 +209,6 @@ func checkCiliumCMRouteAgentEnv(ctx context.Context, client kubernetes.Interface
 	}
 
 	if !foundTLSVol {
-		status.Failure("route-agent is missing volume cilium-cm-tls")
+		status.Failure("route-agent is missing volume %s", ciliumcm.VolumeName)
 	}
 }
