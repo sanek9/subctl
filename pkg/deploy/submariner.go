@@ -31,6 +31,7 @@ import (
 	"github.com/submariner-io/subctl/pkg/secret"
 	"github.com/submariner-io/subctl/pkg/submarinercr"
 	operatorv1alpha1 "github.com/submariner-io/submariner-operator/api/v1alpha1"
+	"github.com/submariner-io/submariner-operator/pkg/ciliumcm"
 	"github.com/submariner-io/submariner-operator/pkg/discovery/clustersetip"
 	"github.com/submariner-io/submariner-operator/pkg/discovery/globalnet"
 	v1 "k8s.io/api/core/v1"
@@ -75,6 +76,15 @@ func Submariner(ctx context.Context, clientProducer client.Producer, options *Su
 	}
 
 	submarinerSpec := populateSubmarinerSpec(options, brokerInfo, brokerSecret, pskSecret, netconfig, clustersetConfig, repositoryInfo)
+
+	if submarinerSpec.CiliumNamespace == "" {
+		ciliumNS, findErr := ciliumcm.FindUniqueCiliumConfigNamespace(ctx, clientProducer.ForKubernetes())
+		if findErr != nil {
+			return status.Error(findErr, "Error discovering Cilium namespace")
+		}
+
+		submarinerSpec.CiliumNamespace = ciliumNS
+	}
 
 	err = SubmarinerFromSpec(ctx, clientProducer.ForGeneral(), submarinerSpec)
 
