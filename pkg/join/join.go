@@ -64,6 +64,11 @@ func ClusterToBroker(ctx context.Context, brokerInfo *broker.Info, options *Opti
 		return status.Error(err, "Error calculating image overrides")
 	}
 
+	cableDriverOptions, err := ParseCableDriverOptions(options.CableDriverOptionArr)
+	if err != nil {
+		return status.Error(err, "Invalid cable driver option")
+	}
+
 	status.Start("Gathering relevant information from Broker")
 	defer status.End()
 
@@ -144,7 +149,7 @@ func ClusterToBroker(ctx context.Context, brokerInfo *broker.Info, options *Opti
 	if brokerInfo.IsConnectivityEnabled() {
 		status.Start("Deploying submariner")
 
-		err := deploy.Submariner(ctx, clientProducer, submarinerOptionsFrom(options), brokerInfo, brokerSecret, netconfig,
+		err := deploy.Submariner(ctx, clientProducer, submarinerOptionsFrom(options, cableDriverOptions), brokerInfo, brokerSecret, netconfig,
 			clustersetConfig, repositoryInfo, status)
 		if err != nil {
 			return status.Error(err, "Error deploying the Submariner resource")
@@ -166,7 +171,7 @@ func ClusterToBroker(ctx context.Context, brokerInfo *broker.Info, options *Opti
 	return nil
 }
 
-func submarinerOptionsFrom(joinOptions *Options) *deploy.SubmarinerOptions {
+func submarinerOptionsFrom(joinOptions *Options, cableDriverOptions map[string]string) *deploy.SubmarinerOptions {
 	return &deploy.SubmarinerOptions{
 		PreferredServer:                 joinOptions.PreferredServer,
 		ForceUDPEncaps:                  joinOptions.ForceUDPEncaps,
@@ -181,6 +186,7 @@ func submarinerOptionsFrom(joinOptions *Options) *deploy.SubmarinerOptions {
 		HealthCheckMaxPacketLossCount:   joinOptions.HealthCheckMaxPacketLossCount,
 		ClusterID:                       joinOptions.ClusterID,
 		CableDriver:                     joinOptions.CableDriver,
+		CableDriverOptions:              cableDriverOptions,
 		CoreDNSCustomConfigMap:          joinOptions.CoreDNSCustomConfigMap,
 		Repository:                      joinOptions.Repository,
 		ImageVersion:                    joinOptions.ImageVersion,
@@ -247,6 +253,26 @@ func isValidCustomCoreDNSConfig(corednsCustomConfigMap string) error {
 	}
 
 	return nil
+}
+
+// ParseCableDriverOptions parses repeated key=value flag values into a map.
+func ParseCableDriverOptions(options []string) (map[string]string, error) {
+	if len(options) == 0 {
+		return nil, nil
+	}
+
+	result := make(map[string]string, len(options))
+
+	for _, s := range options {
+		key, value, found := strings.Cut(s, "=")
+		if !found {
+			return nil, fmt.Errorf("invalid option %q provided. Please use `key=value` syntax", s)
+		}
+
+		result[key] = value
+	}
+
+	return result, nil
 }
 
 func ensureUniqueCluster(ctx context.Context, clusterID string, brokerProducer client.Producer, brokerNamespace string,

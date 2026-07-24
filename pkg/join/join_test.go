@@ -50,6 +50,25 @@ var _ = Describe("ClusterToBroker", func() {
 	Describe("Invalid input", testInvalidInput)
 })
 
+var _ = Describe("ParseCableDriverOptions", func() {
+	It("should return nil for an empty input", func() {
+		Expect(join.ParseCableDriverOptions(nil)).To(BeNil())
+		Expect(join.ParseCableDriverOptions([]string{})).To(BeNil())
+	})
+
+	It("should parse key=value pairs", func() {
+		Expect(join.ParseCableDriverOptions([]string{"jc=7", "h1=1-2"})).To(Equal(map[string]string{
+			"jc": "7",
+			"h1": "1-2",
+		}))
+	})
+
+	It("should fail when = is missing", func() {
+		_, err := join.ParseCableDriverOptions([]string{"jc"})
+		Expect(err).To(HaveOccurred())
+	})
+})
+
 func testDeployment() {
 	t := newTestDriver()
 
@@ -74,6 +93,7 @@ func testDeployment() {
 			ServiceCIDR:                     "101.42.0.0/16",
 			ClusterCIDR:                     "201.67.0.0/16",
 			CableDriver:                     "vxlan",
+			CableDriverOptionArr:            []string{"jc=7"},
 			CoreDNSCustomConfigMap:          "my-map",
 			CustomDomains:                   []string{"my-domain"},
 			HTTPProxyConfig: httpproxy.Config{
@@ -106,6 +126,7 @@ func testDeployment() {
 		Expect(subm.Spec.ClusterCIDR).To(Equal(t.options.ClusterCIDR))
 		Expect(subm.Spec.GlobalCIDR).To(BeEmpty())
 		Expect(subm.Spec.CableDriver).To(Equal(t.options.CableDriver))
+		Expect(subm.Spec.CableDriverOptions).To(Equal(map[string]string{"jc": "7"}))
 
 		Expect(subm.Spec.NatEnabled).To(Equal(t.options.NATTraversal))
 		Expect(subm.Spec.AirGappedDeployment).To(Equal(t.options.AirGappedDeployment))

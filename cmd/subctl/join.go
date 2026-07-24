@@ -102,6 +102,10 @@ func (c *JoinCommand) checkArguments(args []string) error {
 		return err
 	}
 
+	if _, err := join.ParseCableDriverOptions(c.flags.CableDriverOptionArr); err != nil {
+		return err
+	}
+
 	return checkImageOverrides(c.flags.ImageOverrideArr)
 }
 
@@ -137,6 +141,8 @@ func (c *JoinCommand) addFlags() {
 	c.cmd.Flags().BoolVar(&c.flags.OperatorDebug, "operator-debug", false, "enable operator debugging (verbose logging)")
 	c.cmd.Flags().BoolVar(&c.labelGateway, "label-gateway", true, "label gateways if necessary")
 	c.cmd.Flags().StringVar(&c.flags.CableDriver, "cable-driver", "libreswan", "cable driver implementation")
+	c.cmd.Flags().StringArrayVar(&c.flags.CableDriverOptionArr, "cable-driver-option", nil,
+		"cable driver option as key=value (can be repeated; for example AmneziaWG obfuscation parameters)")
 	c.cmd.Flags().UintVar(&c.flags.GlobalnetClusterSize, "globalnet-cluster-size", 0,
 		"cluster size for GlobalCIDR allocated to this cluster (amount of global IPs)")
 	c.cmd.Flags().StringVar(&c.flags.GlobalnetCIDR, "globalnet-cidr", "",
