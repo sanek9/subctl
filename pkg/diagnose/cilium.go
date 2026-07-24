@@ -99,13 +99,19 @@ func checkCiliumClusterID(ctx context.Context, client kubernetes.Interface, cili
 	clusterName := cm.Data["cluster-name"]
 
 	if clusterID == "" || clusterID == "0" {
-		status.Failure("cilium-config cluster-id is %q; set to 1..255 for the ClusterMesh-shaped publisher",
+		status.Failure("cilium-config cluster-id is %q; set to 1..254 (255 is reserved for Submariner)",
 			clusterID)
+	} else if clusterID == ciliumcm.DefaultClusterID {
+		status.Failure("cilium-config cluster-id %s is reserved for the Submariner ClusterMesh-shaped publisher; use 1..254",
+			ciliumcm.DefaultClusterID)
 	}
 
 	if clusterName == "" || clusterName == "default" {
 		status.Failure("cilium-config cluster-name is %q; set a non-default name for ClusterMesh",
 			clusterName)
+	} else if clusterName == ciliumcm.DefaultRemoteName {
+		status.Failure("cilium-config cluster-name %q is reserved for the Submariner ClusterMesh peer",
+			ciliumcm.DefaultRemoteName)
 	}
 }
 

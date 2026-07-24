@@ -28,6 +28,7 @@ import (
 	"github.com/submariner-io/admiral/pkg/names"
 	"github.com/submariner-io/subctl/internal/constants"
 	"github.com/submariner-io/subctl/pkg/diagnose"
+	"github.com/submariner-io/submariner-operator/pkg/ciliumcm"
 	submarinerv1 "github.com/submariner-io/submariner/pkg/apis/submariner.io/v1"
 	"github.com/submariner-io/submariner/pkg/cni"
 	appsv1 "k8s.io/api/apps/v1"
@@ -354,6 +355,17 @@ func (t *cniTestDriver) testCiliumCNIPlugin() {
 		})
 
 		t.testFailure(t.run, "cluster-id")
+	})
+
+	Context("and cilium-config cluster-id is reserved for Submariner", func() {
+		BeforeEach(func(ctx SpecContext) {
+			t.createCiliumConfig(ctx, ciliumcm.DefaultClusterID, "test-cluster")
+			t.createCiliumTLSSecret(ctx)
+			t.createCiliumClusterMeshSecret(ctx)
+			t.createCiliumRouteAgent(ctx)
+		})
+
+		t.testFailure(t.run, "reserved")
 	})
 
 	Context("and the TLS Secret is missing", func() {
